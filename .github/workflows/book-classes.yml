@@ -1,0 +1,25 @@
+name: Arbox Auto Booker
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  book:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm install
+
+      - run: node scripts/book.js
+        env:
+          ARBOX_ACCESS_TOKEN: ${{ secrets.ARBOX_ACCESS_TOKEN }}
+          ARBOX_REFRESH_TOKEN: ${{ secrets.ARBOX_REFRESH_TOKEN }}
+          ARBOX_MEMBERSHIP_USER_ID: ${{ secrets.ARBOX_MEMBERSHIP_USER_ID }}
