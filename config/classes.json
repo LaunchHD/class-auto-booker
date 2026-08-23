@@ -2,19 +2,13 @@
   "locationsBoxId": 22523,
   "boxId": 24783,
 
-  "recurring": [
-    {
-      "weekday": "Tuesday",
-      "time": "18:00",
-      "className": "Signature"
-    }
-  ],
+  "recurring": [],
 
   "oneOff": [
     {
-      "date": "2026-08-25",
-      "time": "07:00",
-      "className": "Yoga"
+      "date": "2026-08-27",
+      "time": "08:00",
+      "className": "Signature"
     }
   ]
 }
