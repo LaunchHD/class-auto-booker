@@ -1,0 +1,10 @@
+{
+  "name": "arbox-auto-booker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Auto-books Arbox (Peach and Power) classes the instant the 75-hour registration window opens.",
+  "dependencies": {
+    "luxon": "^3.4.4"
+  }
+}
