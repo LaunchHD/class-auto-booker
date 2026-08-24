@@ -1,14 +1,1 @@
-{
-  "locationsBoxId": 22523,
-  "boxId": 24783,
 
-  "recurring": [],
-
-  "oneOff": [
-    {
-      "date": "2026-08-27",
-      "time": "08:00",
-      "className": "Signature"
-    }
-  ]
-}
