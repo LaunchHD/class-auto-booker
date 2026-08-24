@@ -2,13 +2,28 @@ name: Arbox Auto Booker
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
-  workflow_dispatch: {}
+    # Hourly, at :17 past the hour rather than :00 — GitHub's own docs
+    # note the top of the hour is the most congested time for scheduled
+    # runs, so offsetting reduces the odds of this getting delayed/dropped.
+    # Hourly (rather than every 10 min) is also just plain more reliable
+    # on GitHub's shared scheduler — the actual booking-time precision
+    # comes from the script sleeping internally until the exact moment,
+    # not from how often this cron fires.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (log what it would book, but never actually book anything)"
+        type: boolean
+        default: true
 
 jobs:
   book:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Needs to comfortably cover: setup (~30s) + up to a ~5.5h internal
+    # sleep + the 90s retry window. GitHub's hard cap for hosted runners
+    # is 360 minutes (6h) — this stays safely under that.
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
@@ -23,3 +38,4 @@ jobs:
           ARBOX_ACCESS_TOKEN: ${{ secrets.ARBOX_ACCESS_TOKEN }}
           ARBOX_REFRESH_TOKEN: ${{ secrets.ARBOX_REFRESH_TOKEN }}
           ARBOX_MEMBERSHIP_USER_ID: ${{ secrets.ARBOX_MEMBERSHIP_USER_ID }}
+          DRY_RUN: ${{ inputs.dry_run == true && 'true' || 'false' }}
