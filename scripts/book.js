@@ -1,16 +1,19 @@
 // Arbox (Peach and Power) auto-booker
 //
-// Runs on a cron schedule (see .github/workflows/book-classes.yml). Each run:
-//   1. Reads config/classes.json to see which classes should be booked.
-//   2. For each entry, figures out which real calendar date that refers to.
-//   3. Fetches the live schedule for that date and finds the matching class
-//      (by day/time/category name) to get its real schedule_id.
-//   4. Works out exactly when that class's registration window opens
-//      (class start time minus its registration-window hours).
-//   5. If that moment is coming up soon, waits until it, then hammers the
-//      booking endpoint every ~1.5s until it succeeds or gives up.
+// GitHub's free scheduled-cron trigger is "best effort" — it does NOT
+// reliably fire every N minutes, especially for tightly-spaced schedules.
+// So instead of relying on GitHub to wake this script up at the exact
+// right second, the design is:
+//   - Cron runs hourly (reliable enough at that cadence).
+//   - Each run checks: is any configured class's registration window
+//     opening within the next ~5.5 hours? If not, exit immediately.
+//   - If yes, THIS run internally sleeps (via the script's own clock,
+//     not GitHub's scheduler) until the exact opening moment, then
+//     hammers the booking endpoint every ~1.5s until it succeeds.
 //
-// Most runs (the class isn't opening soon) exit in under a second.
+// This means timing precision comes from code we fully control, not from
+// GitHub's queue — an hourly check just needs to catch each class once,
+// at any point up to ~5.5h before it opens, to lock in a precise wait.
 
 import { DateTime } from "luxon";
 import { readFileSync } from "node:fs";
@@ -21,11 +24,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const TIMEZONE = "Asia/Jerusalem";
 const API_BASE = "https://apiappv2.arboxapp.com/api/v2";
 
-// How far ahead/behind "now" we'll bother handling an opening window in a
-// single run. Must be bigger than the cron interval so nothing falls
-// through the gap between two runs.
-const LOOKAHEAD_MINUTES = 12;
-const CATCHUP_MINUTES = 5; // handle windows that opened slightly before this run started
+// How far ahead we'll commit to a long internal sleep-and-wait for a
+// window in a single run. Must comfortably fit under the GitHub Actions
+// hosted-runner hard limit of 6h (360min) once setup/retry time is
+// accounted for, and must be wider than the cron interval (hourly) so
+// nothing can fall through the gap between two runs.
+const LOOKAHEAD_MINUTES = 330; // 5.5 hours
+const CATCHUP_MINUTES = 15; // handle windows that opened shortly before this run started
 
 // How long/hard to retry once we're at (or past) the opening moment.
 const RETRY_WINDOW_MS = 90_000;
@@ -142,6 +147,11 @@ function findMatch(schedule, target) {
 }
 
 async function attemptBooking(scheduleId) {
+  if (process.env.DRY_RUN === "true") {
+    console.log(`  [DRY RUN] Would send booking request for schedule_id ${scheduleId} now (not actually sent).`);
+    return { success: true, dryRun: true };
+  }
+
   const res = await fetch(`${API_BASE}/scheduleUser/insert`, {
     method: "POST",
     headers: authHeaders(),
@@ -238,7 +248,11 @@ async function handleTarget(config, target) {
     attempt += 1;
     const result = await attemptBooking(match.id);
     if (result.success) {
-      console.log(`  ✅ Booked on attempt ${attempt}! schedule_id ${match.id}.`);
+      console.log(
+        result.dryRun
+          ? `  ✅ [DRY RUN] Would have booked on attempt ${attempt} (schedule_id ${match.id}). No real request sent.`
+          : `  ✅ Booked on attempt ${attempt}! schedule_id ${match.id}.`
+      );
       return;
     }
     if (!result.tooEarly) {
@@ -258,13 +272,14 @@ async function handleTarget(config, target) {
 async function main() {
   const config = loadConfig();
   const targets = resolveTargets(config);
-  for (const target of targets) {
-    try {
-      await handleTarget(config, target);
-    } catch (err) {
-      console.error(`Error handling ${target.label}:`, err);
+  const results = await Promise.allSettled(
+    targets.map((target) => handleTarget(config, target))
+  );
+  results.forEach((r, i) => {
+    if (r.status === "rejected") {
+      console.error(`Error handling ${targets[i].label}:`, r.reason);
     }
-  }
+  });
 }
 
 main().catch((err) => {
