@@ -1,5 +1,7 @@
 name: Arbox Auto Booker
-
+concurrency:
+  group: arbox-auto-booker
+  cancel-in-progress: false
 on:
   schedule:
     # Hourly, at :17 past the hour rather than :00 — GitHub's own docs
