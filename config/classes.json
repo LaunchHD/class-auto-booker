@@ -2,5 +2,9 @@
   "locationsBoxId": 22523,
   "boxId": 24783,
   "recurring": [],
-  "oneOff": []
+  "oneOff": [
+    { "date": "2026-09-06", "time": "18:00", "className": "open gym" },
+    { "date": "2026-09-08", "time": "09:30", "className": "Signature" },
+    { "date": "2026-09-09", "time": "09:30", "className": "LAB SURPRISE EDITION" }
+  ]
 }
