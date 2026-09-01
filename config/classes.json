@@ -2,16 +2,5 @@
   "locationsBoxId": 22523,
   "boxId": 24783,
   "recurring": [],
-  "oneOff": [
-    {
-      "date": "2026-09-03",
-      "time": "09:30",
-      "className": "LAB SURPRISE EDITION"
-    },
-    {
-      "date": "2026-09-04",
-      "time": "10:30",
-      "className": "Lift & Sip"
-    }
-  ]
+  "oneOff": []
 }
