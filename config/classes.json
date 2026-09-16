@@ -3,9 +3,9 @@
   "boxId": 24783,
   "recurring": [],
   "oneOff": [
-    { "date": "2026-09-20", "time": "09:30", "className": "Signature" },
-    { "date": "2026-09-22", "time": "09:30", "className": "Signature" },
-    { "date": "2026-09-23", "time": "09:30", "className": "LAB ABC: Arms Booty Core" },
-    { "date": "2026-09-24", "time": "08:00", "className": "Signature" }
+    { "date": "2026-09-20", "time": "10:30", "className": "Signature" },
+    { "date": "2026-09-22", "time": "09:30", "className": "open gym" },
+    { "date": "2026-09-23", "time": "08:00", "className": "Signature" },
+    { "date": "2026-09-24", "time": "08:00", "className": "Power" }
   ]
 }
