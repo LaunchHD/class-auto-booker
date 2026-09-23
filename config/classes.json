@@ -3,7 +3,8 @@
   "boxId": 24783,
   "recurring": [],
   "oneOff": [
-    { "date": "2026-09-29", "time": "09:30", "className": "Signature" },
-    { "date": "2026-09-30", "time": "09:30", "className": "LAB CHAIRS" }
+    { "date": "2026-10-01", "time": "08:00", "className": "Signature" },
+    { "date": "2026-09-30", "time": "09:30", "className": "LAB CHAIRS" },
+    { "date": "2026-10-02", "time": "09:00", "className": "LAB ABC: Arms Booty Core" }
   ]
 }
