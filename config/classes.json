@@ -4,6 +4,7 @@
   "recurring": [],
   "oneOff": [
     { "date": "2026-09-29", "time": "09:30", "className": "open gym" },
-    { "date": "2026-09-30", "time": "09:30", "className": "LAB CHAIRS" }
+    { "date": "2026-09-30", "time": "09:30", "className": "LAB CHAIRS" },
+    { "date": "2026-10-02", "time": "10:30", "className": "Lift & Sip" }
   ]
 }
