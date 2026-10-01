@@ -146,6 +146,10 @@ function findMatch(schedule, target) {
   });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function attemptBooking(scheduleId) {
   if (process.env.DRY_RUN === "true") {
     console.log(`  [DRY RUN] Would send booking request for schedule_id ${scheduleId} now (not actually sent).`);
@@ -163,25 +167,30 @@ async function attemptBooking(scheduleId) {
   });
 
   let body = null;
+  let rawText = null;
   try {
+    rawText = await res.clone().text();
     body = await res.json();
   } catch {
     // non-JSON response, leave body null
+  }
+  if (!res.ok) {
+    console.log(`  Raw response (status ${res.status}): ${rawText}`);
   }
 
   if (res.ok) {
     return { success: true, body };
   }
 
-  const tooEarly = body?.error?.messageToUser?.some(
-    (m) => m.name === "registerScheduleDisabled"
-  );
+  // Defensive: don't assume Arbox always sends messageToUser as an array —
+  // be tolerant of unexpected shapes instead of crashing on them.
+  const messages = Array.isArray(body?.error?.messageToUser)
+    ? body.error.messageToUser
+    : [];
+  const tooEarly = messages.some((m) => m.name === "registerScheduleDisabled");
+  const alreadyRegistered = messages.some((m) => m.name === "alreadyRegistered");
 
-  return { success: false, tooEarly, status: res.status, body };
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return { success: false, tooEarly, alreadyRegistered, status: res.status, body };
 }
 
 async function handleTarget(config, target) {
@@ -246,7 +255,14 @@ async function handleTarget(config, target) {
   let attempt = 0;
   while (Date.now() < deadline) {
     attempt += 1;
-    const result = await attemptBooking(match.id);
+    let result;
+    try {
+      result = await attemptBooking(match.id);
+    } catch (err) {
+      console.log(`  ⚠️ Unexpected error on attempt ${attempt} (will keep retrying): ${err.message}`);
+      await sleep(RETRY_INTERVAL_MS);
+      continue;
+    }
     if (result.success) {
       console.log(
         result.dryRun
@@ -256,12 +272,9 @@ async function handleTarget(config, target) {
       return;
     }
     if (!result.tooEarly) {
-      console.log(
-        `  ❌ Booking failed (not a "too early" error) on attempt ${attempt}: HTTP ${result.status} ${JSON.stringify(
-          result.body
-        )}`
-      );
-      return;
+      const msg = `Booking failed for ${target.label} on attempt ${attempt}: HTTP ${result.status} ${JSON.stringify(result.body)}`;
+      console.log(`  ❌ ${msg}`);
+      throw new Error(msg); // propagates as a real failure → red job + failure email
     }
     console.log(`  Attempt ${attempt}: window not open yet, retrying...`);
     await sleep(RETRY_INTERVAL_MS);
@@ -275,11 +288,16 @@ async function main() {
   const results = await Promise.allSettled(
     targets.map((target) => handleTarget(config, target))
   );
+  let hadError = false;
   results.forEach((r, i) => {
     if (r.status === "rejected") {
+      hadError = true;
       console.error(`Error handling ${targets[i].label}:`, r.reason);
     }
   });
+  if (hadError) {
+    process.exitCode = 1; // makes the job show red + triggers GitHub's failure email
+  }
 }
 
 main().catch((err) => {
