@@ -3,6 +3,8 @@
   "boxId": 24783,
   "recurring": [],
   "oneOff": [
-    { "date": "2026-10-09", "time": "09:00", "className": "LAB ABC: Arms Booty Core" }
+    { "date": "2026-10-13", "time": "09:30", "className": "open gym" },
+    { "date": "2026-10-14", "time": "09:30", "className": "Power" },
+    { "date": "2026-10-16", "time": "10:30", "className": "Lift & Sip" }
   ]
 }
