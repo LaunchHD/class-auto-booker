@@ -240,7 +240,29 @@ async function handleTarget(config, target) {
   );
 
   if (minutesUntilOpen > LOOKAHEAD_MINUTES) {
-    console.log("  Not opening soon enough to act on this run. Skipping.");
+    console.log(
+      `  Predicted opening is still far off (in ${minutesUntilOpen.toFixed(1)} min) — not committing to a full wait this run, but trying one quick probe booking in case that prediction is wrong...`
+    );
+    let probe;
+    try {
+      probe = await attemptBooking(match.id);
+    } catch (err) {
+      console.log(`  Probe attempt errored (ignoring, will retry next run): ${err.message}`);
+      return;
+    }
+    if (probe.success) {
+      console.log(
+        probe.dryRun
+          ? `  ✅ [DRY RUN] Probe indicates this is already bookable! (schedule_id ${match.id})`
+          : `  ✅ Booked via probe — the predicted opening time was wrong, this was already open. schedule_id ${match.id}.`
+      );
+      return;
+    }
+    if (!probe.tooEarly) {
+      console.log(`  Probe failed with an unexpected (non "too early") error: HTTP ${probe.status} ${JSON.stringify(probe.body)}. Will retry next run.`);
+    } else {
+      console.log("  Confirmed still not open. Skipping full wait for this run.");
+    }
     return;
   }
   if (minutesUntilOpen < -CATCHUP_MINUTES) {
