@@ -29,9 +29,9 @@ const API_BASE = "https://apiappv2.arboxapp.com/api/v2";
 // hosted-runner hard limit of 6h (360min) once setup/retry time is
 // accounted for, and must be wider than the cron interval (hourly) so
 // nothing can fall through the gap between two runs.
-const LOOKAHEAD_MINUTES = 150; // 2.5 hours — balances Actions-minutes cost
-                                // against surviving GitHub's observed
-                                // multi-hour scheduling gaps.
+const LOOKAHEAD_MINUTES = 330; // 5.5 hours — public repo has no Actions-minutes
+                                // cap, so widen this back out for more buffer
+                                // against GitHub's scheduling gaps.
 const CATCHUP_MINUTES = 15; // handle windows that opened shortly before this run started
 
 // How long/hard to retry once we're at (or past) the opening moment.
