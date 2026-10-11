@@ -25,7 +25,7 @@ jobs:
     # Needs to comfortably cover: setup (~30s) + up to a ~5.5h internal
     # sleep + the 90s retry window. GitHub's hard cap for hosted runners
     # is 360 minutes (6h) — this stays safely under that.
-    timeout-minutes: 170
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
