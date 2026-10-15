@@ -3,7 +3,7 @@
   "boxId": 24783,
   "recurring": [],
   "oneOff": [
-    { "date": "2026-10-18", "time": "19:30", "className": "Power" },
+    { "date": "2026-10-21", "time": "09:30", "className": "Power" },
     { "date": "2026-10-20", "time": "09:30", "className": "open gym" }
   ]
 }
