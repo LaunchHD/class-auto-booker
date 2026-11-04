@@ -5,6 +5,6 @@
   "oneOff": [
     { "date": "2026-11-03", "time": "09:30", "className": "open gym" },
     { "date": "2026-11-05", "time": "09:30", "className": "Signature" },
-    { "date": "2026-11-06", "time": "09:00", "className": "LAB ABC: Arms Booty Core" }
+    { "date": "2026-11-06", "time": "09:15", "className": "LAB ABC: Arms Booty Core" }
   ]
 }
