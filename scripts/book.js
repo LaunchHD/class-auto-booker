@@ -35,7 +35,11 @@ const LOOKAHEAD_MINUTES = 330; // 5.5 hours — public repo has no Actions-minut
 const CATCHUP_MINUTES = 15; // handle windows that opened shortly before this run started
 
 // How long/hard to retry once we're at (or past) the opening moment.
-const RETRY_WINDOW_MS = 90_000;
+const RETRY_WINDOW_MS = 120_000;
+
+// Stay under the workflow's 350-min timeout when re-aiming mid-run.
+const RUN_START = Date.now();
+const RUN_BUDGET_MS = 340 * 60_000;
 const RETRY_INTERVAL_MS = 1_500;
 
 function getEnv(name) {
@@ -152,6 +156,20 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Cloudflare (in front of Arbox) answers with 429 when it rate-limits us, and
+// with 52x/50x when the origin hiccups. These are momentary — worth retrying.
+// NOTE: Arbox's OWN business-rule codes look like 5xx too (514 too early,
+// 516 full, 518 membership) — those are NOT transient.
+function isTransient(status, body) {
+  return (
+    body?.cloudflare_error === true ||
+    status === 408 ||
+    status === 429 ||
+    [500, 502, 503, 504].includes(status) ||
+    (status >= 520 && status <= 526)
+  );
+}
+
 async function attemptBooking(scheduleId) {
   if (process.env.DRY_RUN === "true") {
     console.log(`  [DRY RUN] Would send booking request for schedule_id ${scheduleId} now (not actually sent).`);
@@ -189,10 +207,18 @@ async function attemptBooking(scheduleId) {
   const messages = Array.isArray(body?.error?.messageToUser)
     ? body.error.messageToUser
     : [];
-  const tooEarly = messages.some((m) => m.name === "registerScheduleDisabled");
+  const tooEarlyMsg = messages.find((m) => m.name === "registerScheduleDisabled");
+  const tooEarly = Boolean(tooEarlyMsg);
+  // The server tells us the window it ACTUALLY enforces (e.g. "73 hours").
+  const serverHours = Number(tooEarlyMsg?.value?.hours) || null;
   const alreadyRegistered = messages.some((m) => m.name === "alreadyRegistered");
+  const transient = isTransient(res.status, body);
+  const retryAfterMs = Math.min((Number(body?.retry_after) || 0) * 1000, 30_000);
 
-  return { success: false, tooEarly, alreadyRegistered, status: res.status, body };
+  return {
+    success: false, tooEarly, serverHours, alreadyRegistered,
+    transient, retryAfterMs, status: res.status, body,
+  };
 }
 
 async function handleTarget(config, target) {
@@ -213,60 +239,77 @@ async function handleTarget(config, target) {
     return;
   }
 
-  // The class object itself carries its own registration-window length
-  // (in hours). Trust this over any hardcoded assumption, since Arbox
-  // does allow different windows per category.
-  const registrationHours = match.enable_registration_time ?? 75;
+  // Starting guess for the registration window, from the class data.
+  // (The server's own answer below overrides this — the two can disagree.)
+  let registrationHours = match.enable_registration_time ?? 75;
 
   const classStart = DateTime.fromFormat(
     `${match.date} ${match.time}`,
     "yyyy-MM-dd HH:mm",
     { zone: TIMEZONE }
   );
-  const opensAt = classStart.minus({ hours: registrationHours });
-  const now = DateTime.now().setZone(TIMEZONE);
-
-  if (now > classStart) {
+  if (DateTime.now().setZone(TIMEZONE) > classStart) {
     console.log(`  This occurrence (${classStart.toISO()}) has already happened. Skipping.`);
     return;
   }
 
-  const minutesUntilOpen = opensAt.diff(now, "minutes").minutes;
+  const minutesUntil = (hours) =>
+    classStart.minus({ hours }).diff(DateTime.now().setZone(TIMEZONE), "minutes").minutes;
 
   console.log(
-    `  Matched schedule_id ${match.id}. Registration opens ${opensAt.toISO()} (in ${minutesUntilOpen.toFixed(
-      1
-    )} min).`
+    `  Matched schedule_id ${match.id}. Class data says registration opens ${classStart
+      .minus({ hours: registrationHours })
+      .toISO()} (in ${minutesUntil(registrationHours).toFixed(1)} min).`
   );
 
-  if (minutesUntilOpen > LOOKAHEAD_MINUTES) {
+  // Ask the server once, up front. If it's already open we book right now; if
+  // it's too early the rejection states the real window, which we trust over
+  // the class data (seen in production: data implied 74h, server enforced 73h,
+  // so the script woke an hour early and burned its retry window).
+  let probe = null;
+  try {
+    probe = await attemptBooking(match.id);
+  } catch (err) {
+    console.log(`  Probe errored (continuing with class-data window): ${err.message}`);
+  }
+  if (probe?.success) {
     console.log(
-      `  Predicted opening is still far off (in ${minutesUntilOpen.toFixed(1)} min) — not committing to a full wait this run, but trying one quick probe booking in case that prediction is wrong...`
+      probe.dryRun
+        ? `  ✅ [DRY RUN] Probe indicates this is bookable right now (schedule_id ${match.id}).`
+        : `  ✅ Booked on the up-front probe! schedule_id ${match.id}.`
     );
-    let probe;
-    try {
-      probe = await attemptBooking(match.id);
-    } catch (err) {
-      console.log(`  Probe attempt errored (ignoring, will retry next run): ${err.message}`);
-      return;
-    }
-    if (probe.success) {
+    return;
+  }
+  if (probe?.alreadyRegistered) {
+    console.log("  Server says already registered. Nothing to do.");
+    return;
+  }
+  if (probe?.tooEarly && probe.serverHours) {
+    if (probe.serverHours !== registrationHours) {
       console.log(
-        probe.dryRun
-          ? `  ✅ [DRY RUN] Probe indicates this is already bookable! (schedule_id ${match.id})`
-          : `  ✅ Booked via probe — the predicted opening time was wrong, this was already open. schedule_id ${match.id}.`
+        `  Server enforces a ${probe.serverHours}h window (class data said ${registrationHours}h) — using the server's.`
       );
-      return;
     }
-    if (!probe.tooEarly) {
-      console.log(`  Probe failed with an unexpected (non "too early") error: HTTP ${probe.status} ${JSON.stringify(probe.body)}. Will retry next run.`);
-    } else {
-      console.log("  Confirmed still not open. Skipping full wait for this run.");
+    registrationHours = probe.serverHours;
+  } else if (probe && !probe.tooEarly && !probe.transient) {
+    const msg = `Unexpected response for ${target.label}: HTTP ${probe.status} ${JSON.stringify(probe.body)}`;
+    console.log(`  ❌ ${msg}`);
+    if (minutesUntil(registrationHours) <= LOOKAHEAD_MINUTES) {
+      throw new Error(msg); // about to matter → red job + failure email
     }
+    return; // far off: log it, don't spam alerts
+  }
+
+  let opensAt = classStart.minus({ hours: registrationHours });
+  const minutesUntilOpen = minutesUntil(registrationHours);
+  console.log(`  Registration opens ${opensAt.toISO()} (in ${minutesUntilOpen.toFixed(1)} min).`);
+
+  if (minutesUntilOpen > LOOKAHEAD_MINUTES) {
+    console.log("  Not opening soon enough to act on this run. Skipping.");
     return;
   }
   if (minutesUntilOpen < -CATCHUP_MINUTES) {
-    console.log("  Window opened a while ago and it's still unbooked — trying once as a catch-up attempt.");
+    console.log("  Window opened a while ago and it's still unbooked — trying as a catch-up attempt.");
   }
 
   if (minutesUntilOpen > 0) {
@@ -275,8 +318,9 @@ async function handleTarget(config, target) {
     await sleep(Math.max(0, waitMs));
   }
 
-  const deadline = Date.now() + RETRY_WINDOW_MS;
+  let deadline = Date.now() + RETRY_WINDOW_MS;
   let attempt = 0;
+  let transientCount = 0;
   while (Date.now() < deadline) {
     attempt += 1;
     let result;
@@ -295,15 +339,48 @@ async function handleTarget(config, target) {
       );
       return;
     }
+    if (result.alreadyRegistered) {
+      console.log("  Already registered (another run got it). Nothing to do.");
+      return;
+    }
+    if (result.transient) {
+      // Rate-limited / origin hiccup: back off and keep trying rather than abort.
+      transientCount += 1;
+      if (transientCount > 6) {
+        throw new Error(`Gave up after repeated rate-limit/server errors for ${target.label} (last: HTTP ${result.status})`);
+      }
+      const backoff = Math.max(result.retryAfterMs, Math.min(2000 * 2 ** transientCount, 30_000));
+      console.log(`  Attempt ${attempt}: HTTP ${result.status} (transient) — backing off ${(backoff / 1000).toFixed(0)}s...`);
+      await sleep(backoff);
+      continue;
+    }
     if (!result.tooEarly) {
       const msg = `Booking failed for ${target.label} on attempt ${attempt}: HTTP ${result.status} ${JSON.stringify(result.body)}`;
       console.log(`  ❌ ${msg}`);
       throw new Error(msg); // propagates as a real failure → red job + failure email
     }
+    // Still "too early". If the server's window differs from what we aimed at,
+    // re-aim (a later run picks it up if it would overrun this job's time limit).
+    if (result.serverHours && result.serverHours !== registrationHours) {
+      registrationHours = result.serverHours;
+      opensAt = classStart.minus({ hours: registrationHours });
+      const waitMs = opensAt.diff(DateTime.now().setZone(TIMEZONE)).as("milliseconds");
+      console.log(`  Server window is ${registrationHours}h — re-aiming for ${opensAt.toISO()}.`);
+      if (waitMs > 0) {
+        if (Date.now() - RUN_START + waitMs + RETRY_WINDOW_MS > RUN_BUDGET_MS) {
+          console.log("  Too far for this run's time limit; a later run will pick it up.");
+          return;
+        }
+        await sleep(waitMs);
+      }
+      deadline = Date.now() + RETRY_WINDOW_MS;
+      continue;
+    }
     console.log(`  Attempt ${attempt}: window not open yet, retrying...`);
     await sleep(RETRY_INTERVAL_MS);
   }
-  console.log(`  ⏱️ Gave up after ${attempt} attempts — window never opened within the retry period.`);
+  // Silent exit 0 here would hide a missed booking — make it loud.
+  throw new Error(`Gave up on ${target.label} after ${attempt} attempts — window never opened within the retry period.`);
 }
 
 async function main() {
